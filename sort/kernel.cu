@@ -15,21 +15,43 @@ int getblock(int length) {
 	return block;
 }
 
-__device__ void merge0_first(int* a_s, int tid) {//传入的tid的值不是最初的值
-	int r1 = a_s[tid * 2];
-	int r2 = a_s[tid * 2 + 1];
+__device__ void merge_block(int *a_s, int thread_tid) {
+	int r1 = 0, r2 = 0;
+	
+	//先获取r1,r2的值
+	bool flag = (thread_tid < blocksize / 2);
+	if (flag) {
+		thread_tid *= 4;
+		r1 = a_s[thread_tid];
+		r2 = a_s[thread_tid+1];
+	}
+	else
+	{
+		thread_tid %= (blocksize / 2);//thread_tid大小不要大于(blocksize/2)
+		thread_tid *= 4;
+		r1 = a_s[thread_tid+2];
+		r2 = a_s[thread_tid + 3];
+	}
+	__syncthreads();//获取完后一定要同步
 
-	int merge_pair = tid;//两个组一起合并，合并组的配对编号
-	
-	
+
+	//找到插入的位置
+	int p1 = 0, p2 = 0;//p1,p2为插入的位置
+	if (flag) {
+		p1 = insert0_1(r1, a_s, thread_tid + 2);
+		p2 = insert0_1(r2, a_s, thread_tid + 2)+1;
+	}
+	else
+	{
+		p1 = insert1_1(r1, a_s, thread_tid);
+		p2 = insert1_1(r2, a_s, thread_tid)+1;
+	}
+
+	//根据p1,p2进行插入
+	a_s[p1] = r1;
+	a_s[p2] = r2;
 }
 
-__device__ void merge1_first(int* a_s, int tid) {
-	int r1 = a_s[tid * 2+(blocksize/2)];
-	int r2 = a_s[tid * 2 + 1+(blocksize/2)];
-
-	int merge_pair = tid;
-}
 
 __global__ void sort_int_kernel(int *a_h, int *a_d, int length) {
 	
@@ -56,22 +78,15 @@ __global__ void sort_int_kernel(int *a_h, int *a_d, int length) {
 	}
 
 	//放入共享内存并同步
-	a_s[threadIdx.x] = r1;
-	a_s[threadIdx.x + 1] = r2;
+	int t2 = threadIdx.x * 2;
+	a_s[t2] = r1;
+	a_s[t2 + 1] = r2;
 	__syncthreads();
 
-	//执行不同的函数的线程尽量分开，减少损耗
-	if (threadIdx.x >= blocksize/2) {
-		merge1_first(a_s, threadIdx.x % (blocksize / 2));
-	}
-	else
-	{
-		merge0_first(a_s, threadIdx.x % (blocksize / 2));
-	}
-
-	
-	a_d[tid] = a_s[threadIdx.x + 1];
-	a_d[tid - 1] = a_s[threadIdx.x];
+	merge_block(a_s, threadIdx.x);
+		
+	a_d[tid] = a_s[t2 + 1];
+	a_d[tid - 1] = a_s[t2];
 }
 
 void sort_int(int *a,int lg2,int length) {
@@ -79,9 +94,10 @@ void sort_int(int *a,int lg2,int length) {
 	printf("length_dev = %d\n", length_dev);
 	int *a_dev;
 	int *a_map;
+	if (length_dev < blocksize)length_dev = blocksize;
 	cudaMalloc((void**)&a_dev, length_dev * sizeof(int));
 	cudaHostGetDevicePointer((void **)&a_map, (void *)a, 0);
-	sort_int_kernel<<<getblock(length),length/2>>>(a_map, a_dev, length);
+	sort_int_kernel<<<getblock(length),blocksize>>>(a_map, a_dev, length);
 	cudaMemcpy(a,a_dev,length*sizeof(int), cudaMemcpyDeviceToHost);
 }
 
@@ -104,7 +120,7 @@ int* genarray(int length) {
 	int *a;
 	cudaHostAlloc((void**)&a, length*sizeof(int), cudaHostAllocMapped);
 	for (int i = 0; i < length; i++) {
-		a[i] =  i*3;
+		a[i] =  i;
 	};
 
 	return a;
@@ -121,8 +137,8 @@ int main() {
 	int lg2 = getlg2(length);
 	printf("lg2 = %d\n", lg2);
 
-	int in = insert0_4(10, a, 0);
-	printf("in = %d\n", in);
-	sort_int(a,lg2,length);
+	int in = insert0_4(-1, a, 0);
+	printf("in = %d \n", in);
+	//sort_int(a,lg2,length);
 	getchar();
 }
