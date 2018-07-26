@@ -1,3 +1,11 @@
+insert.cu是根据以下的函数生成的
+
+
+
+
+
+
+
 //__device__ __host__ int insert0(int a, int *array, int offset, int lg2) {
 //	int shift;
 //	while (lg2 > 0) {
